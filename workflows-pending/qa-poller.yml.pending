@@ -1,0 +1,20 @@
+name: QA Poller — dispatch to Claude
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'  # 5분마다
+  workflow_dispatch: {}     # 수동 실행 가능
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: npm ci
+      - name: Poll Firestore and dispatch GitHub issues
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          CLAUDE_ISSUE_PAT: ${{ secrets.CLAUDE_ISSUE_PAT }}
+        run: npm run poll

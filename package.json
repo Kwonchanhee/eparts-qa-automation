@@ -1,0 +1,14 @@
+{
+  "name": "eparts-qa-automation",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "poll": "node scripts/poll-and-dispatch.mjs",
+    "sync-close": "node scripts/sync-close.mjs"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.7.0",
+    "@octokit/rest": "^21.0.2"
+  }
+}

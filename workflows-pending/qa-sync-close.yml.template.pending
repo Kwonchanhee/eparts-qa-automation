@@ -1,0 +1,37 @@
+# 이 파일을 3개 웹 레포 (E-PARTS_FE-main, E-PARTS-ADMIN-FE-main, E-PARTS-MASTER-ADMIN-FE-main)
+# 각각의 .github/workflows/qa-sync-close.yml 에 복사해 두세요.
+#
+# 필요한 시크릿:
+#   - FIREBASE_SERVICE_ACCOUNT_JSON  (원본 JSON 전체)
+
+name: QA Sync — mark done when issue/PR closes
+
+on:
+  issues:
+    types: [closed]
+  pull_request:
+    types: [closed]
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout automation scripts
+        uses: actions/checkout@v4
+        with:
+          repository: byungwook5958-creator/eparts-qa-automation
+          token: ${{ secrets.CLAUDE_ISSUE_PAT }}
+          path: automation
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - working-directory: automation
+        run: npm ci
+      - name: Sync Firestore
+        working-directory: automation
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          EVENT_ACTION: ${{ github.event.pull_request.merged && 'merged' || 'closed' }}
+          EVENT_BODY: ${{ github.event.pull_request.body || github.event.issue.body }}
+        run: npm run sync-close
