@@ -1,0 +1,32 @@
+name: QA Sync — mark done on issue/PR close
+
+on:
+  issues:
+    types: [closed]
+  pull_request:
+    types: [closed]
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout automation scripts
+        uses: actions/checkout@v4
+        with:
+          repository: Kwonchanhee/eparts-qa-automation
+          token: ${{ secrets.CLAUDE_ISSUE_PAT }}
+          path: automation
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - name: Install
+        working-directory: automation
+        run: npm ci
+      - name: Sync Firestore
+        working-directory: automation
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          EVENT_ACTION: ${{ github.event.pull_request.merged }} && 'merged' || 'closed'
+          EVENT_BODY: ${{ github.event.pull_request.body }} ${{ github.event.issue.body }}
+        run: npm run sync-close
