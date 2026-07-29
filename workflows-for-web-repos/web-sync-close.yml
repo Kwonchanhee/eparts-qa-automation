@@ -21,12 +21,14 @@ jobs:
       - name: Install
         working-directory: automation
         run: npm ci
-      - name: Sync Firestore
+      - name: Sync Firestore + Send Email
         working-directory: automation
         env:
           FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           ISSUE_URL: ${{ github.event.issue.html_url }}
           PR_URL: ${{ github.event.pull_request.html_url }}
-          EVENT_ACTION: ${{ github.event.pull_request.merged }} && 'merged' || 'closed'
+          EVENT_ACTION: ${{ github.event.pull_request.merged && 'merged' || 'closed' }}
           EVENT_BODY: ${{ github.event.pull_request.body }} ${{ github.event.issue.body }}
         run: npm run sync-close

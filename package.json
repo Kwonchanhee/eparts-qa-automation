@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "poll": "node scripts/poll-and-dispatch.mjs",
-    "sync-close": "node scripts/sync-close.mjs"
+    "sync-close": "node scripts/sync-close.mjs",
+    "prod-deploy-poll": "node scripts/prod-deploy-poll.mjs"
   },
   "dependencies": {
     "firebase-admin": "^12.7.0",
