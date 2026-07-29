@@ -8,10 +8,6 @@ on:
 jobs:
   create-pr:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-      issues: read
     steps:
       - uses: actions/checkout@v4
 
@@ -25,28 +21,26 @@ jobs:
 
       - name: Create PR
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.CLAUDE_ISSUE_PAT }}
           BRANCH: ${{ steps.issue.outputs.branch }}
           ISSUE_NUM: ${{ steps.issue.outputs.num }}
+          REPO: ${{ github.repository }}
         run: |
-          # 이미 존재하는 PR이 있으면 스킵
-          EXISTING=$(gh pr list --head "$BRANCH" --json number --jq '.[0].number' || echo "")
+          EXISTING=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' || echo "")
           if [ -n "$EXISTING" ]; then
             echo "PR already exists: #$EXISTING"
             exit 0
           fi
           COMMIT_MSG=$(git log -1 --pretty=%s)
-          COMMIT_BODY=$(git log -1 --pretty=%b)
-          BODY="Claude Code Action이 자동 생성한 PR입니다."
+          BODY="Claude Code가 자동 생성한 PR입니다."
           if [ -n "$ISSUE_NUM" ]; then
             BODY="$BODY
 
 Closes #$ISSUE_NUM
-
-## Claude의 변경 사항
-$COMMIT_BODY"
+Fixes https://github.com/$REPO/issues/$ISSUE_NUM"
           fi
           gh pr create \
+            --repo "$REPO" \
             --title "$COMMIT_MSG" \
             --body "$BODY" \
             --base main \

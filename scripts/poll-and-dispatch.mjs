@@ -3,7 +3,7 @@
 // qa_reports 문서를 찾아 GitHub Issue를 만들고 issueUrl을 다시 기록한다.
 
 import { cert, initializeApp } from 'firebase-admin/app';
-import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { Octokit } from '@octokit/rest';
 
 const PROJECT_ID = 'e-parts-a2f29';
@@ -41,17 +41,56 @@ async function main() {
 
   for (const doc of snap.docs) {
     const data = doc.data();
-    if (!data.claudeSession?.startedAt) continue;
-    if (data.claudeSession?.issueUrl) {
-      skipped++;
-      continue; // 이미 dispatch됨
-    }
 
     const target = REPO_BY_SOURCE[data.source];
     if (!target) {
       console.error(`[skip] unknown source: ${data.source} (doc ${doc.id})`);
       skipped++;
       continue;
+    }
+
+    // === 재요청 처리 ===
+    // rerequests 배열에 status='pending'인 항목이 있고, issueUrl이 이미 있으면
+    // 해당 이슈에 @claude 코멘트로 재요청 메시지 추가
+    const rerequests = data.rerequests ?? [];
+    const pendingRerequests = rerequests.filter((r) => r.status === 'pending');
+    if (pendingRerequests.length > 0 && data.claudeSession?.issueUrl) {
+      const issueNumber = Number(data.claudeSession.issueUrl.split('/').pop());
+      for (const rer of pendingRerequests) {
+        try {
+          await octokit.issues.createComment({
+            owner: target.owner,
+            repo: target.repo,
+            issue_number: issueNumber,
+            body: `@claude\n\n**재요청 (rerequest)**\n\n${rer.message}\n\n---\n(QA 관리 웹의 "다시 요청" 버튼을 통해 전달됨)`,
+          });
+        } catch (err) {
+          console.error(`[rerequest] failed for ${doc.id}: ${err.message}`);
+        }
+      }
+      // pending → dispatched로 마킹 (배열 안에서는 serverTimestamp 못 씀, Timestamp.now() 사용)
+      const now = Timestamp.now();
+      const updatedRerequests = rerequests.map((r) =>
+        r.status === 'pending'
+          ? { ...r, status: 'dispatched', dispatchedAt: now }
+          : r
+      );
+      // arrayUnion으로는 update 불가, 통째로 대체
+      await doc.ref.update({
+        rerequests: updatedRerequests,
+        'claudeSession.lastLog': `${pendingRerequests.length}건 재요청 @claude 코멘트 전달됨`,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      console.log(`[rerequest] dispatched ${pendingRerequests.length} for ${doc.id}`);
+      dispatched++;
+      continue;
+    }
+
+    // === 최초 dispatch ===
+    if (!data.claudeSession?.startedAt) continue;
+    if (data.claudeSession?.issueUrl) {
+      skipped++;
+      continue; // 이미 dispatch됨
     }
 
     const body = renderIssueBody({ ...data, id: doc.id });

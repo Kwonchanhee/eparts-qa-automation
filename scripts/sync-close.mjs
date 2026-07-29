@@ -9,6 +9,22 @@ import nodemailer from 'nodemailer';
 const PROJECT_ID = 'e-parts-a2f29';
 const NOTIFY_EMAILS = ['byungwook5958@gmail.com', 'chkwon147@naver.com'];
 const ADMIN_WEB_URL = 'https://e-parts-a2f29.web.app';
+const DEV_URLS = {
+  user: 'https://dev.e-parts.biz',
+  seller: 'https://dev-seller.e-parts.biz',
+  master: 'https://dev-master.e-parts.biz',
+};
+
+function devUrlFor(source, origUrl) {
+  const base = DEV_URLS[source] ?? DEV_URLS.user;
+  if (!origUrl) return base;
+  try {
+    const u = new URL(origUrl);
+    return base + u.pathname + u.search + u.hash;
+  } catch {
+    return base;
+  }
+}
 
 function requireEnv(name) {
   const v = process.env[name];
@@ -32,8 +48,9 @@ async function sendReviewEmail(docId, report, extraLog) {
     return;
   }
   const link = `${ADMIN_WEB_URL}/report/?id=${encodeURIComponent(docId)}`;
+  const devLink = devUrlFor(report.source, report.url);
   const subject = `[E-Parts QA] 처리 완료 확인 요청: ${report.title}`;
-  const text = `${report.title}\n\n${extraLog}\n\n확인: ${link}`;
+  const text = `${report.title}\n\n${extraLog}\n\nDEV 확인: ${devLink}\nQA 관리: ${link}`;
   const html = `<!doctype html>
 <html><body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', sans-serif; color: #111; max-width: 560px; margin: 0 auto; padding: 20px;">
   <div style="background: #00B207; color: #fff; padding: 16px 20px; border-radius: 10px 10px 0 0; font-weight: 700; font-size: 18px;">
@@ -49,15 +66,24 @@ async function sendReviewEmail(docId, report, extraLog) {
     <div style="background: #F9FAFB; padding: 12px 14px; border-radius: 6px; border-left: 3px solid #00B207; margin: 16px 0; font-size: 13px;">
       ${escapeHtml(extraLog)}
     </div>
-    <div style="text-align: center; margin: 24px 0;">
-      <a href="${link}" style="display: inline-block; background: #00B207; color: #fff !important; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 15px;">확인하러 가기 →</a>
+    <div style="text-align: center; margin: 24px 0; display: flex; flex-direction: column; gap: 10px;">
+      <a href="${devLink}" style="display: inline-block; background: #0EA5E9; color: #fff !important; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 15px;">
+        🌐 DEV 웹에서 실제 결과 확인
+      </a>
+      <a href="${link}" style="display: inline-block; background: #00B207; color: #fff !important; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 15px;">
+        ✓ QA 관리 (처리완료/다시요청)
+      </a>
     </div>
     <div style="font-size: 12px; color: #6B7280; text-align: center; word-break: break-all;">
-      링크가 안 열리면: <a href="${link}" style="color: #0EA5E9;">${link}</a>
+      DEV: <a href="${devLink}" style="color: #0EA5E9;">${devLink}</a><br>
+      QA관리: <a href="${link}" style="color: #0EA5E9;">${link}</a>
     </div>
     <hr style="border: none; border-top: 1px solid #F1F5F9; margin: 20px 0;">
     <div style="font-size: 12px; color: #6B7280;">
-      확인 후 문제 없으면 <b>처리완료</b>, 문제 있으면 <b>↩︎ 이 수정만 되돌리기</b> 버튼을 눌러 주세요.
+      DEV에서 확인 후:<br>
+      · 문제 없음 → QA 관리에서 <b>처리완료</b> + <b>🚀 프로덕션 배포</b> 페이지에서 최종 배포<br>
+      · 수정이 부족함 → QA 관리 상세에서 <b>다시 요청</b> 입력하고 재처리 요청<br>
+      · 완전히 되돌리기 → <b>↩︎ 이 수정만 되돌리기</b>
     </div>
   </div>
 </body></html>`;
