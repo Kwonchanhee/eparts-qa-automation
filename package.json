@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "firebase-admin": "^12.7.0",
-    "@octokit/rest": "^21.0.2"
+    "@octokit/rest": "^21.0.2",
+    "nodemailer": "^6.9.16"
   }
 }

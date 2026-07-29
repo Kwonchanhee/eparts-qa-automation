@@ -1,0 +1,53 @@
+name: Auto-create PR from Claude branch
+
+on:
+  push:
+    branches:
+      - 'claude/**'
+
+jobs:
+  create-pr:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Find related issue number
+        id: issue
+        run: |
+          BRANCH="${GITHUB_REF#refs/heads/}"
+          NUM=$(echo "$BRANCH" | grep -oE 'issue-[0-9]+' | grep -oE '[0-9]+' || true)
+          echo "num=$NUM" >> $GITHUB_OUTPUT
+          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+
+      - name: Create PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ steps.issue.outputs.branch }}
+          ISSUE_NUM: ${{ steps.issue.outputs.num }}
+        run: |
+          # 이미 존재하는 PR이 있으면 스킵
+          EXISTING=$(gh pr list --head "$BRANCH" --json number --jq '.[0].number' || echo "")
+          if [ -n "$EXISTING" ]; then
+            echo "PR already exists: #$EXISTING"
+            exit 0
+          fi
+          COMMIT_MSG=$(git log -1 --pretty=%s)
+          COMMIT_BODY=$(git log -1 --pretty=%b)
+          BODY="Claude Code Action이 자동 생성한 PR입니다."
+          if [ -n "$ISSUE_NUM" ]; then
+            BODY="$BODY
+
+Closes #$ISSUE_NUM
+
+## Claude의 변경 사항
+$COMMIT_BODY"
+          fi
+          gh pr create \
+            --title "$COMMIT_MSG" \
+            --body "$BODY" \
+            --base main \
+            --head "$BRANCH"
