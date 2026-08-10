@@ -31,4 +31,9 @@ jobs:
           PR_URL: ${{ github.event.pull_request.html_url }}
           EVENT_ACTION: ${{ github.event.pull_request.merged && 'merged' || 'closed' }}
           EVENT_BODY: ${{ github.event.pull_request.body }} ${{ github.event.issue.body }}
+          PR_MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO_FULL_NAME: ${{ github.repository }}
+          CLAUDE_ISSUE_PAT: ${{ secrets.CLAUDE_ISSUE_PAT }}
         run: npm run sync-close

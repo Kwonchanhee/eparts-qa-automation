@@ -3,7 +3,7 @@
 // - PR merge 시 이메일 자동 발송 (관리자 확인 요청)
 
 import { cert, initializeApp } from 'firebase-admin/app';
-import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
 import nodemailer from 'nodemailer';
 
 const PROJECT_ID = 'e-parts-a2f29';
@@ -107,6 +107,11 @@ async function main() {
   const prUrl = process.env.PR_URL || '';
   const eventAction = process.env.EVENT_ACTION || 'closed'; // closed / merged
   const eventBody = process.env.EVENT_BODY || '';
+  // 프로덕션 배포용: 머지된 PR의 커밋 SHA + 제목 (워크플로우에서 세팅)
+  const prMergeSha = process.env.PR_MERGE_SHA || '';
+  const prTitle = process.env.PR_TITLE || '';
+  const prNumber = process.env.PR_NUMBER || '';
+  const repoFullName = process.env.REPO_FULL_NAME || '';
 
   initializeApp({
     credential: cert(serviceAccountJson),
@@ -146,9 +151,42 @@ async function main() {
   };
   if (prUrl) patch['claudeSession.prUrl'] = prUrl;
 
+  // 디버그: env 값 로그
+  console.log(`[env] eventAction=${eventAction} isMerged=${isMerged} prMergeSha=${prMergeSha ? prMergeSha.slice(0,8) : '(empty)'} prTitle=${prTitle ? prTitle.slice(0,40) : '(empty)'} repoFullName=${repoFullName || '(empty)'}`);
+
+  // 머지된 PR이면 commits[] 배열에 자동 추가 (프로덕션 배포 페이지 리스트에 뜨게)
+  // prMergeSha가 없으면 PR API에서 fetch (auto-merge squash 시 이벤트 페이로드에 종종 누락)
+  let mergeSha = prMergeSha;
+  if (isMerged && !mergeSha && prUrl && repoFullName) {
+    const m = prUrl.match(/\/pull\/(\d+)/);
+    if (m) {
+      try {
+        const { Octokit } = await import('@octokit/rest');
+        const gh = new Octokit({ auth: process.env.CLAUDE_ISSUE_PAT });
+        const [owner, repo] = repoFullName.split('/');
+        const { data } = await gh.pulls.get({ owner, repo, pull_number: Number(m[1]) });
+        mergeSha = data.merge_commit_sha;
+        console.log(`[env] fetched mergeSha=${mergeSha ? mergeSha.slice(0,8) : '(null)'} from GitHub API`);
+      } catch (err) {
+        console.error('[env] PR SHA fetch 실패:', err.message);
+      }
+    }
+  }
+
+  if (isMerged && mergeSha && repoFullName) {
+    const commitObj = {
+      repo: repoFullName,
+      sha: mergeSha,
+      message: prTitle || `PR #${prNumber} merge`,
+      createdAt: Timestamp.now(),
+    };
+    if (prUrl) commitObj.url = `https://github.com/${repoFullName}/commit/${mergeSha}`;
+    patch.commits = FieldValue.arrayUnion(commitObj);
+  }
+
   for (const doc of snap.docs) {
     await doc.ref.update(patch);
-    console.log(`[ok] synced ${doc.id} → status=${patch.status}`);
+    console.log(`[ok] synced ${doc.id} → status=${patch.status}${patch.commits ? ' + commit 기록' : ''}`);
 
     if (isMerged) {
       try {
