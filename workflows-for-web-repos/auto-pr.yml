@@ -5,9 +5,18 @@ on:
     branches:
       - 'claude/**'
 
+permissions:
+  contents: write
+  pull-requests: write
+  issues: read
+
 jobs:
   create-pr:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: read
     steps:
       - uses: actions/checkout@v4
 
@@ -32,16 +41,16 @@ jobs:
             exit 0
           fi
           COMMIT_MSG=$(git log -1 --pretty=%s)
-          BODY="Claude Code가 자동 생성한 PR입니다."
+          BODY_FILE=$(mktemp)
+          echo "Claude Code가 자동 생성한 PR입니다." >> "$BODY_FILE"
           if [ -n "$ISSUE_NUM" ]; then
-            BODY="$BODY
-
-Closes #$ISSUE_NUM
-Fixes https://github.com/$REPO/issues/$ISSUE_NUM"
+            echo "" >> "$BODY_FILE"
+            echo "Closes #$ISSUE_NUM" >> "$BODY_FILE"
+            echo "Fixes https://github.com/$REPO/issues/$ISSUE_NUM" >> "$BODY_FILE"
           fi
           gh pr create \
             --repo "$REPO" \
             --title "$COMMIT_MSG" \
-            --body "$BODY" \
+            --body-file "$BODY_FILE" \
             --base main \
             --head "$BRANCH"

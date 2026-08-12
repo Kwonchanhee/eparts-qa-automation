@@ -141,8 +141,13 @@ async function main() {
         const r = await db.collection("qa_reports").doc(id).get();
         if (!r.exists) continue;
         const rd = r.data();
+        // 커밋 없는 QA는 배포 대상 아님 (프론트에서 필터로 걸러야 함, 안전장치)
+        if ((rd.commits ?? []).length === 0) {
+          console.log(`  skip ${id} (커밋 없음 — 배포 대상 아님)`);
+          continue;
+        }
         validReports.push({ id, data: rd });
-        for (const c of rd.commits ?? []) {
+        for (const c of rd.commits) {
           if (!commitsByRepo.has(c.repo)) commitsByRepo.set(c.repo, []);
           commitsByRepo.get(c.repo).push({ sha: c.sha, message: c.message, reportId: id });
         }
@@ -213,7 +218,7 @@ async function main() {
         results.push({ repo, ok: true, method, commitCount: commits.length });
       }
 
-      const allOk = results.every((r) => r.ok);
+      const allOk = results.length > 0 && results.every((r) => r.ok);
       const summary = results
         .map((r) => {
           const short = r.repo.split("/")[1];
