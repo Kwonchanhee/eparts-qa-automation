@@ -51,12 +51,15 @@ async function main() {
     }
 
     // === stuck 감지 ===
-    // Claude가 이슈에 finish 코멘트를 남겼지만 PR 없이 open 상태로 끝난 경우 (예: 코드 변경 없음/저장소 미스매치).
-    // 방치하면 in_progress로 무한 대기. 관리자가 즉시 확인할 수 있도록 needs_review로 강제 승격 + 안내 로그.
-    // pending re-request가 있으면 이 감지를 건너뛴다 (재요청이 우선 dispatch되어야 함).
+    // 아래 두 경우 모두 in_progress로 stuck되므로 자동으로 needs_review 승격.
+    //   (a) 최초 dispatch 이후 Claude finish 코멘트만 있고 PR이 아예 없음 (예: 저장소 미스매치)
+    //   (b) 재요청 후 Claude가 "코드 문제 없음"이라며 새 PR을 안 만듦 (기존 PR이 있어도)
+    //
+    // 조건: 이슈가 있고 + pending 재요청은 없어야 함(재요청은 이후 dispatch되어야 하므로 우선).
+    // 판정: 마지막 dispatch(최초 startedAt 또는 마지막 rerequest.dispatchedAt) 이후에 Claude finish 코멘트가 있으면
+    //       그 사이 새 커밋/PR이 생기지 않았는지 확인 → 없으면 stuck.
     if (
       data.claudeSession?.issueUrl &&
-      !data.claudeSession?.prUrl &&
       (data.rerequests ?? []).every((r) => r.status !== 'pending')
     ) {
       const issueNumber = Number(data.claudeSession.issueUrl.split('/').pop());
@@ -67,7 +70,6 @@ async function main() {
           issue_number: issueNumber,
           per_page: 30,
         });
-        // 마지막 dispatch (재요청 or 최초) 이후에 새로 달린 Claude finish 코멘트를 찾는다.
         const rerequests = data.rerequests ?? [];
         const lastDispatchAt =
           rerequests
@@ -83,32 +85,66 @@ async function main() {
         );
         if (finishCandidates.length > 0) {
           const last = finishCandidates[finishCandidates.length - 1];
-          // 코드 변경 없이 finish한 시그니처 (heuristic).
-          const noChangeSignals = [
-            '변경할 코드가 없',
-            '변경할 게 없',
-            '별도 커밋은 진행하지 않',
-            '별도 커밋은 필요하지 않',
-            '수정할 코드가 없',
-            '추가로 변경할 코드가 없',
-            '이 저장소',
-            '이 프론트엔드',
-            '이 프로젝트에서는',
-            'no code changes',
-            'no changes needed',
-          ];
-          const looksNoChange = noChangeSignals.some((s) => (last.body || '').includes(s));
-          const shortBody = (last.body || '').replace(/\s+/g, ' ').slice(0, 180);
-          await doc.ref.update({
-            status: 'needs_review',
-            'claudeSession.lastLog': looksNoChange
-              ? `⚠️ Claude가 자동 처리 불가로 판단 (코드 변경 없음). GitHub 이슈 코멘트 확인 필요: ${shortBody}...`
-              : `Claude 응답 완료 (PR 없음). GitHub 이슈 코멘트 확인: ${shortBody}...`,
-            updatedAt: FieldValue.serverTimestamp(),
-          });
-          console.log(`[stuck-promoted] ${doc.id} → needs_review (${looksNoChange ? 'no-change' : 'finish-no-pr'})`);
-          dispatched++;
-          continue;
+          const lastFinishAt = new Date(last.created_at).getTime();
+
+          // 마지막 dispatch 이후 이 QA를 위한 새 PR이 생성됐는지 확인.
+          // GitHub PR 검색: 브랜치명 컨벤션 claude/issue-{N}-* 또는 이슈 번호로 링크된 PR.
+          let hasNewPr = false;
+          try {
+            const { data: prSearch } = await octokit.pulls.list({
+              owner: target.owner,
+              repo: target.repo,
+              state: 'all',
+              sort: 'updated',
+              direction: 'desc',
+              per_page: 10,
+            });
+            hasNewPr = prSearch.some((pr) => {
+              const created = new Date(pr.created_at).getTime();
+              if (created <= lastDispatchAt) return false;
+              const headRef = pr.head?.ref ?? '';
+              return headRef.includes(`issue-${issueNumber}-`) || headRef.includes(`issue-${issueNumber}`);
+            });
+          } catch (err) {
+            console.error(`[stuck-check] PR list 실패 ${doc.id}: ${err.message}`);
+          }
+
+          if (!hasNewPr) {
+            const noChangeSignals = [
+              '변경할 코드가 없',
+              '변경할 게 없',
+              '별도 커밋은 진행하지 않',
+              '별도 커밋은 필요하지 않',
+              '수정할 코드가 없',
+              '추가로 변경할 코드가 없',
+              '추가 커밋 없이',
+              '이번에는 추가 커밋 없이',
+              '이 저장소',
+              '이 프론트엔드',
+              '이 프로젝트에서는',
+              '로직상 문제가 없',
+              '이미 반영되어',
+              '이미 구현되어',
+              '캐시',
+              '재현',
+              'no code changes',
+              'no changes needed',
+            ];
+            const looksNoChange = noChangeSignals.some((s) => (last.body || '').includes(s));
+            const shortBody = (last.body || '').replace(/\s+/g, ' ').slice(0, 220);
+            await doc.ref.update({
+              status: 'needs_review',
+              'claudeSession.lastLog': looksNoChange
+                ? `⚠️ Claude가 재검토 후 코드 문제 없다고 판단 (추가 커밋 없음). 관리자 확인 필요: ${shortBody}...`
+                : `Claude 응답 완료 (PR 없음). GitHub 이슈 코멘트 확인: ${shortBody}...`,
+              updatedAt: FieldValue.serverTimestamp(),
+            });
+            console.log(
+              `[stuck-promoted] ${doc.id} → needs_review (${looksNoChange ? 'no-change' : 'finish-no-pr'}, finishAt=${new Date(lastFinishAt).toISOString()})`,
+            );
+            dispatched++;
+            continue;
+          }
         }
       } catch (err) {
         console.error(`[stuck-check] ${doc.id}: ${err.message}`);
