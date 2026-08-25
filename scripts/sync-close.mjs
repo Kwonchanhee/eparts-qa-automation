@@ -5,6 +5,8 @@
 import { cert, initializeApp } from 'firebase-admin/app';
 import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
 import nodemailer from 'nodemailer';
+import { saveLesson } from './lib/lesson-store.mjs';
+import { Octokit } from '@octokit/rest';
 
 const PROJECT_ID = 'e-parts-a2f29';
 const NOTIFY_EMAILS = ['byungwook5958@gmail.com', 'chkwon147@naver.com'];
@@ -194,6 +196,62 @@ async function main() {
       } catch (err) {
         console.error('[email] 발송 실패:', err.message);
       }
+    }
+
+    // qa_lessons 자동 수집. Claude가 다음 유사 이슈 처리 시 자동으로 컨텍스트에 반영됨.
+    // 이슈가 close된 시점 = 하나의 사이클 종료 → 회고 저장 적기.
+    try {
+      const data = doc.data();
+      const rerequestMessages = (data.rerequests ?? [])
+        .map((r) => r?.message)
+        .filter(Boolean);
+      const prUrls = [];
+      if (prUrl) prUrls.push(prUrl);
+
+      // Claude 마지막 응답을 GitHub 이슈 코멘트에서 가져옴 (있으면).
+      let finalClaudeComment = '';
+      if (process.env.CLAUDE_ISSUE_PAT && repoFullName && anchorUrl) {
+        try {
+          const m = anchorUrl.match(/\/issues\/(\d+)/);
+          if (m) {
+            const gh = new Octokit({ auth: process.env.CLAUDE_ISSUE_PAT });
+            const [owner, repo] = repoFullName.split('/');
+            const { data: cs } = await gh.issues.listComments({
+              owner,
+              repo,
+              issue_number: Number(m[1]),
+              per_page: 20,
+            });
+            const claudeComments = cs.filter((c) => c.user?.login === 'claude');
+            if (claudeComments.length > 0) {
+              finalClaudeComment = (claudeComments[claudeComments.length - 1].body || '')
+                .replace(/\s+/g, ' ')
+                .slice(0, 600);
+            }
+          }
+        } catch (err) {
+          console.error('[lesson] 코멘트 조회 실패:', err.message);
+        }
+      }
+
+      const outcome = isMerged ? 'merged' : 'closed_no_pr';
+      await saveLesson(db, {
+        sourceQaId: doc.id,
+        source: data.source,
+        category: data.category,
+        title: data.title,
+        description: data.description,
+        issueUrl: anchorUrl,
+        prUrls,
+        rerequestCount: rerequestMessages.length,
+        outcome,
+        summary: '', // 초기엔 빈값. 관리자가 관리 웹에서 편집 가능(v2). 매칭엔 rerequestMessages + finalClaudeComment 사용.
+        rerequestMessages,
+        finalClaudeComment,
+      });
+      console.log(`[lesson] saved ${doc.id} (outcome=${outcome}, rerequests=${rerequestMessages.length})`);
+    } catch (err) {
+      console.error('[lesson] 저장 실패:', err.message);
     }
   }
 }

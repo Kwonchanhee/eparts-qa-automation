@@ -5,6 +5,7 @@
 import { cert, initializeApp } from 'firebase-admin/app';
 import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { Octokit } from '@octokit/rest';
+import { findRelatedLessons, renderLessonsForIssue } from './lib/lesson-store.mjs';
 
 const PROJECT_ID = 'e-parts-a2f29';
 
@@ -158,7 +159,28 @@ async function main() {
       continue; // 이미 dispatch됨
     }
 
-    const body = renderIssueBody({ ...data, id: doc.id });
+    // 과거 관련 lesson 조회 → 이슈 body에 주입 (Claude가 자연스럽게 참고하도록).
+    let lessonsMarkdown = '';
+    try {
+      const lessons = await findRelatedLessons(
+        db,
+        {
+          source: data.source,
+          category: data.category,
+          title: data.title,
+          description: data.description,
+        },
+        5,
+      );
+      lessonsMarkdown = renderLessonsForIssue(lessons);
+      if (lessons.length > 0) {
+        console.log(`[lessons] ${doc.id} → ${lessons.length}건 주입`);
+      }
+    } catch (err) {
+      console.error(`[lessons] 조회 실패 for ${doc.id}:`, err.message);
+    }
+
+    const body = renderIssueBody({ ...data, id: doc.id }) + lessonsMarkdown;
     try {
       const { data: issue } = await octokit.issues.create({
         owner: target.owner,
