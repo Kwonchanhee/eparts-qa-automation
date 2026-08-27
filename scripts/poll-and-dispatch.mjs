@@ -51,19 +51,42 @@ async function main() {
     }
 
     // === stuck 감지 ===
-    // 아래 두 경우 모두 in_progress로 stuck되므로 자동으로 needs_review 승격.
-    //   (a) 최초 dispatch 이후 Claude finish 코멘트만 있고 PR이 아예 없음 (예: 저장소 미스매치)
-    //   (b) 재요청 후 Claude가 "코드 문제 없음"이라며 새 PR을 안 만듦 (기존 PR이 있어도)
+    // 아래 케이스들 모두 in_progress로 stuck되므로 자동으로 needs_review 승격.
+    //   (a) 최초 dispatch 이후 Claude finish 코멘트만 있고 PR이 아예 없음
+    //   (b) 재요청 후 Claude가 "코드 문제 없음"이라며 새 PR을 안 만듦
+    //   (c) 이슈가 CLOSED 상태인데 status가 여전히 in_progress (모든 사이클 종료됐는데 놓친 케이스)
     //
     // 조건: 이슈가 있고 + pending 재요청은 없어야 함(재요청은 이후 dispatch되어야 하므로 우선).
-    // 판정: 마지막 dispatch(최초 startedAt 또는 마지막 rerequest.dispatchedAt) 이후에 Claude finish 코멘트가 있으면
-    //       그 사이 새 커밋/PR이 생기지 않았는지 확인 → 없으면 stuck.
     if (
       data.claudeSession?.issueUrl &&
       (data.rerequests ?? []).every((r) => r.status !== 'pending')
     ) {
       const issueNumber = Number(data.claudeSession.issueUrl.split('/').pop());
       try {
+        // 이슈 상태 먼저 확인 — CLOSED면 이슈-레벨 사이클은 종료. 아무리 늦어도 관리자한테 넘겨야 함.
+        let issueState = 'open';
+        try {
+          const { data: issue } = await octokit.issues.get({
+            owner: target.owner,
+            repo: target.repo,
+            issue_number: issueNumber,
+          });
+          issueState = issue.state ?? 'open';
+        } catch (err) {
+          console.error(`[stuck-check] issue.get 실패 ${doc.id}: ${err.message}`);
+        }
+
+        if (issueState === 'closed') {
+          await doc.ref.update({
+            status: 'needs_review',
+            'claudeSession.lastLog': `⚠️ GitHub 이슈는 CLOSED인데 QA는 in_progress로 남아있었음. 관리자 확인 필요. 이슈 코멘트 확인: ${data.claudeSession.issueUrl}`,
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+          console.log(`[stuck-promoted] ${doc.id} → needs_review (issue-closed but in_progress)`);
+          dispatched++;
+          continue;
+        }
+
         const { data: comments } = await octokit.issues.listComments({
           owner: target.owner,
           repo: target.repo,
