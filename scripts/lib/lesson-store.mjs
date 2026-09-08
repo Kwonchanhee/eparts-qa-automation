@@ -153,7 +153,17 @@ export async function findRelatedLessons(db, criteria, limit = 5) {
  */
 export function renderLessonsForIssue(lessons) {
   if (!lessons || lessons.length === 0) return '';
-  const lines = ['', '---', '', '## 🧠 관련 과거 교훈 (자동 수집)', '', '이 이슈와 유사한 과거 처리 사례입니다. 같은 실수를 반복하지 말고 참고해서 진행해 주세요:', ''];
+  const lines = [
+    '',
+    '---',
+    '',
+    '## 🧠 관련 과거 교훈 (자동 수집) — 반드시 참고하세요',
+    '',
+    '이 이슈와 유사한 과거 처리 사례입니다. **아래 사례들을 반드시 검토하고, 특히 재요청 사유와 이전 Claude의 판단 실수를 다시 반복하지 마세요.**',
+    '`closed_no_pr`/`wont_fix`는 이전에 "코드 변경 없음"이나 잘못된 저장소 판단으로 실패했던 케이스이니, 이번엔 실제로 수정 가능한 지점을 재확인하세요.',
+    '',
+  ];
+
   lessons.forEach((l, i) => {
     const outcomeIcon = {
       merged: '✅',
@@ -161,24 +171,51 @@ export function renderLessonsForIssue(lessons) {
       wont_fix: '❌',
       rolled_back: '↩️',
     }[l.outcome] ?? '📝';
+    const outcomeLabel = {
+      merged: '처리완료',
+      closed_no_pr: '코드변경 없이 종료(주의)',
+      wont_fix: '보류',
+      rolled_back: '롤백',
+    }[l.outcome] ?? l.outcome;
+
     lines.push(`### ${i + 1}. ${outcomeIcon} [${l.source}/${l.category}] ${l.title}`);
-    if (l.issueUrl) lines.push(`- 원본: ${l.issueUrl}`);
-    if (l.rerequestCount > 0) lines.push(`- 재요청 ${l.rerequestCount}회 발생 (관리자가 여러 번 수정 요청함)`);
+    lines.push(`- **결과**: ${outcomeLabel}${l.rerequestCount > 0 ? ` · 재요청 ${l.rerequestCount}회 발생 (관리자가 여러 번 수정 요청)` : ''}`);
+    if (l.issueUrl) lines.push(`- 원본 이슈: ${l.issueUrl}`);
     if (Array.isArray(l.prUrls) && l.prUrls.length > 0) {
       lines.push(`- 관련 PR: ${l.prUrls.slice(0, 5).join(', ')}`);
     }
-    if (l.summary) {
-      lines.push(`- 요약: ${l.summary}`);
+
+    // 원본 요청 요약 (관리자가 애초에 뭘 원했는지)
+    const desc = l.summary || l.description || '';
+    if (desc) {
+      const short = String(desc).replace(/\s+/g, ' ').trim().slice(0, 300);
+      lines.push(`- **원본 요청 요약**: ${short}${short.length >= 300 ? '…' : ''}`);
     }
+
+    // 재요청 사유 (관리자가 왜 다시 요청했는지 = 이전 처리의 실수 지점)
     if (Array.isArray(l.rerequestMessages) && l.rerequestMessages.length > 0) {
-      lines.push(`- 재요청 사유(요약):`);
+      lines.push(`- **관리자 재요청 사유(이전 처리 실수 지점)**:`);
       l.rerequestMessages.slice(0, 3).forEach((m) => {
-        const short = String(m).replace(/\s+/g, ' ').slice(0, 200);
+        const short = String(m).replace(/\s+/g, ' ').slice(0, 250);
         lines.push(`  - "${short}"`);
       });
     }
+
+    // Claude의 마지막 응답 요약 (자동 처리 불가 판단 사유 등)
+    if (l.finalClaudeComment) {
+      const short = String(l.finalClaudeComment).replace(/\s+/g, ' ').trim().slice(0, 400);
+      lines.push(`- **이전 Claude 마지막 응답 요약**: ${short}${short.length >= 400 ? '…' : ''}`);
+    }
+
+    // 롤백된 케이스는 특별히 강조 (같은 방향으로 재수정하면 또 롤백당함)
+    if (l.outcome === 'rolled_back') {
+      lines.push('- ⚠️ **이 방향의 수정은 이후 관리자가 롤백했음**. 같은 방식으로 재수정 시 또 롤백될 가능성 큼.');
+    }
+
     lines.push('');
   });
-  lines.push('---', '');
+
+  lines.push('**주의**: 위 사례들의 결과/재요청 사유를 반영하지 않고 이전과 똑같이 처리하면 관리자가 다시 재요청하거나 롤백할 가능성이 높습니다. 코드 변경이 필요없다고 판단되면, "왜 관리자가 이슈를 등록했을지" 재확인하세요 (dev/prod 배포 격차, 캐시, 재현 시나리오 등).');
+  lines.push('', '---', '');
   return lines.join('\n');
 }
