@@ -1,9 +1,10 @@
 name: QA Poller — dispatch to Claude
 
+# 트리거: 로컬 데몬(~/qa-daemon/daemon.mjs)이 workflow_dispatch로 5분마다 백업 + Firestore
+# 이벤트 실시간 즉시 트리거. schedule 크론은 private repo Actions 무료 tier 2000분/월 소진
+# 회피 위해 제거 (2026-09-10).
 on:
-  schedule:
-    - cron: '*/5 * * * *'  # 5분마다
-  workflow_dispatch: {}     # 수동 실행 가능
+  workflow_dispatch: {}
 
 jobs:
   poll:
