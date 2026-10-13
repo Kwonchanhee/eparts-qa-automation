@@ -5,7 +5,7 @@
 import { cert, initializeApp } from 'firebase-admin/app';
 import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
 import nodemailer from 'nodemailer';
-import { saveLesson } from './lib/lesson-store.mjs';
+import { saveLesson, isClaudeAuthor } from './lib/lesson-store.mjs';
 import { Octokit } from '@octokit/rest';
 
 const PROJECT_ID = 'e-parts-a2f29';
@@ -222,7 +222,7 @@ async function main() {
               issue_number: Number(m[1]),
               per_page: 20,
             });
-            const claudeComments = cs.filter((c) => c.user?.login === 'claude');
+            const claudeComments = cs.filter((c) => isClaudeAuthor(c.user?.login));
             if (claudeComments.length > 0) {
               finalClaudeComment = (claudeComments[claudeComments.length - 1].body || '')
                 .replace(/\s+/g, ' ')

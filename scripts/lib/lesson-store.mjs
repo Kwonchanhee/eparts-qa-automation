@@ -219,3 +219,13 @@ export function renderLessonsForIssue(lessons) {
   lines.push('', '---', '');
   return lines.join('\n');
 }
+
+/**
+ * GitHub 코멘트 작성자가 Claude인지 판별.
+ * Claude Code Action은 GitHub App이라 REST API에서 login이 'claude[bot]'으로 내려온다.
+ * 과거 'claude' 정확 일치로 비교해 stuck 감지와 lesson 수집이 모두 동작하지 않았음.
+ */
+export function isClaudeAuthor(login) {
+  if (!login) return false;
+  return /^claude(\[bot\])?$/i.test(String(login));
+}

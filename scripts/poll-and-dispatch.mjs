@@ -5,7 +5,7 @@
 import { cert, initializeApp } from 'firebase-admin/app';
 import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { Octokit } from '@octokit/rest';
-import { findRelatedLessons, renderLessonsForIssue } from './lib/lesson-store.mjs';
+import { findRelatedLessons, renderLessonsForIssue, isClaudeAuthor } from './lib/lesson-store.mjs';
 
 const PROJECT_ID = 'e-parts-a2f29';
 
@@ -102,7 +102,7 @@ async function main() {
           0;
         const finishCandidates = comments.filter(
           (c) =>
-            c.user?.login === 'claude' &&
+            isClaudeAuthor(c.user?.login) &&
             /Claude finished/.test(c.body || '') &&
             new Date(c.created_at).getTime() > lastDispatchAt,
         );
